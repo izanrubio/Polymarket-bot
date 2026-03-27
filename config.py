@@ -52,12 +52,15 @@ LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
 def validate():
     """Comprueba que la configuración mínima esté presente."""
-    if not PRIVATE_KEY or PRIVATE_KEY == "0xTU_CLAVE_PRIVADA_AQUI":
-        raise ValueError(
-            "❌ No has configurado PRIVATE_KEY en el archivo .env\n"
-            "   Copia .env.example como .env y rellena tu clave privada."
-        )
-    if not PRIVATE_KEY.startswith("0x"):
-        raise ValueError("❌ PRIVATE_KEY debe empezar con '0x'")
+    # En paper trading no se necesita clave privada
+    if not PAPER_TRADING and not DRY_RUN:
+        if not PRIVATE_KEY or PRIVATE_KEY == "0xTU_CLAVE_PRIVADA_AQUI":
+            raise ValueError(
+                "❌ No has configurado PRIVATE_KEY en el archivo .env\n"
+                "   Copia .env.example como .env y rellena tu clave privada.\n"
+                "   (Para paper trading no necesitas clave, pon PAPER_TRADING=true)"
+            )
+        if not PRIVATE_KEY.startswith("0x"):
+            raise ValueError("❌ PRIVATE_KEY debe empezar con '0x'")
     if MAX_POSITION_USDC <= 0:
         raise ValueError("❌ MAX_POSITION_USDC debe ser mayor que 0")
