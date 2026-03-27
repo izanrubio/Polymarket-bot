@@ -9,7 +9,6 @@ Modos de operación:
 from loguru import logger
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs, OrderType
-from py_clob_client.constants import BUY
 
 from src.strategy import TradeSignal, Side
 from src.risk import RiskManager
@@ -71,7 +70,7 @@ class Trader:
             token_id=signal.token_id,
             price=signal.entry_price,
             size=size_shares,
-            side=BUY,
+            side="BUY",
         )
         try:
             signed_order = self._client.create_order(order_args)
