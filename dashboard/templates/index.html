@@ -271,14 +271,14 @@
       <div class="stat-card">
         <div class="stat-label"><i class="bi bi-wallet2"></i> Balance</div>
         <div class="stat-value neutral" id="s-balance">—</div>
-        <div class="stat-sub">USDC disponibles</div>
+        <div class="stat-sub" id="s-balance-eur">≈ — €</div>
       </div>
     </div>
     <div class="col-6 col-lg-3">
       <div class="stat-card">
         <div class="stat-label"><i class="bi bi-graph-up-arrow"></i> P&L Total</div>
         <div class="stat-value" id="s-pnl">—</div>
-        <div class="stat-sub" id="s-roi">ROI: —</div>
+        <div class="stat-sub" id="s-pnl-eur">≈ — € | ROI: —</div>
       </div>
     </div>
     <div class="col-6 col-lg-3">
@@ -448,7 +448,10 @@ const pnlChart = new Chart(pnlCtx, {
         borderColor: "#30363d",
         borderWidth: 1,
         callbacks: {
-          label: ctx => ` P&L: ${ctx.parsed.y >= 0 ? "+" : ""}${ctx.parsed.y.toFixed(2)} USDC`
+          label: ctx => {
+            const usdc = ctx.parsed.y;
+            return ` P&L: ${usdc >= 0 ? "+" : ""}${usdc.toFixed(2)} USDC`;
+          }
         }
       }
     },
@@ -507,11 +510,16 @@ async function refreshStats() {
     const s = await r.json();
 
     document.getElementById("s-balance").textContent = s.balance.toFixed(2) + " USDC";
+    document.getElementById("s-balance-eur").textContent = "≈ " + s.balance_eur.toFixed(2) + " €";
+
     const pnlEl = document.getElementById("s-pnl");
     pnlEl.textContent = (s.total_pnl >= 0 ? "+" : "") + s.total_pnl.toFixed(2) + " USDC";
     pnlEl.className = "stat-value " + (s.total_pnl >= 0 ? "positive" : "negative");
 
-    document.getElementById("s-roi").textContent = "ROI: " + (s.roi >= 0 ? "+" : "") + s.roi.toFixed(1) + "%";
+    const pnlSign = s.total_pnl_eur >= 0 ? "+" : "";
+    document.getElementById("s-pnl-eur").textContent =
+      "≈ " + pnlSign + s.total_pnl_eur.toFixed(2) + " € | ROI: " +
+      (s.roi >= 0 ? "+" : "") + s.roi.toFixed(1) + "%";
     document.getElementById("s-winrate").textContent = s.win_rate.toFixed(0) + "%";
     document.getElementById("s-winbar").style.width = s.win_rate + "%";
     document.getElementById("s-wl").textContent = `${s.won} gan. / ${s.lost} perd.`;
@@ -569,7 +577,7 @@ async function refreshOpen() {
         <td title="${t.question}">${truncate(t.question, 38)}</td>
         <td>${sideBadge(t.side)}</td>
         <td>${t.entry_price.toFixed(3)}</td>
-        <td>${t.size_usdc.toFixed(2)} USDC</td>
+        <td>${t.size_usdc.toFixed(2)} USDC<br><small class="text-muted">≈ ${(t.size_eur||0).toFixed(2)} €</small></td>
         <td>${fmtDate(t.timestamp)}</td>
       </tr>`).join("");
 
@@ -602,8 +610,8 @@ async function refreshHistory() {
         <td title="${t.question}">${truncate(t.question, 40)}</td>
         <td>${sideBadge(t.side)}</td>
         <td>${t.entry_price.toFixed(3)}</td>
-        <td>${t.size_usdc.toFixed(2)} USDC</td>
-        <td>${fmtPnl(t.pnl)}</td>
+        <td>${t.size_usdc.toFixed(2)} USDC<br><small class="text-muted">≈ ${(t.size_eur||0).toFixed(2)} €</small></td>
+        <td>${fmtPnl(t.pnl)}${t.pnl_eur != null ? `<br><small class="text-muted">≈ ${t.pnl_eur >= 0 ? "+" : ""}${(t.pnl_eur||0).toFixed(2)} €</small>` : ""}</td>
         <td>${statusBadge(t.status)}</td>
       </tr>`).join("");
 
