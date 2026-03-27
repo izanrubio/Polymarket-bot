@@ -35,6 +35,16 @@ MAX_DAILY_LOSS_USDC: float = float(os.getenv("MAX_DAILY_LOSS_USDC", "25.0"))
 MAX_OPEN_POSITIONS: int = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
 KELLY_FRACTION: float = float(os.getenv("KELLY_FRACTION", "0.25"))
 
+# ── Paper Trading ────────────────────────────────────────────────────────────
+# PAPER_TRADING=true → simula operaciones con dinero ficticio y guarda historial
+PAPER_TRADING: bool = os.getenv("PAPER_TRADING", "true").lower() == "true"
+# Balance ficticio inicial en USDC
+PAPER_INITIAL_BALANCE: float = float(os.getenv("PAPER_INITIAL_BALANCE", "1000.0"))
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+DASHBOARD_ENABLED: bool = os.getenv("DASHBOARD_ENABLED", "true").lower() == "true"
+DASHBOARD_PORT: int = int(os.getenv("DASHBOARD_PORT", "5000"))
+
 # ── Bot ──────────────────────────────────────────────────────────────────────
 SCAN_INTERVAL_SECONDS: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

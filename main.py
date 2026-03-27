@@ -1,23 +1,18 @@
 """
 main.py — Punto de entrada del bot de Polymarket
 
-Flujo principal:
-  1. Cargar configuración y validarla
-  2. Conectar con Polymarket (autenticación L1 + L2)
-  3. Mostrar saldo y estado actual
-  4. Escanear mercados activos (Gamma API)
-  5. Analizar cada mercado con la estrategia de imbalance
-  6. Si hay señal y el riesgo lo permite → ejecutar orden
-  7. Repetir cada SCAN_INTERVAL_SECONDS segundos
+Modos:
+  python main.py           → paper trading + dashboard (recomendado para empezar)
+  python main.py --once    → ejecuta un solo ciclo y termina
+  python main.py --scan    → solo escanea, sin guardar operaciones
+  python main.py --no-dash → bot sin dashboard (útil en servidor)
 
-Uso:
-  python main.py          → arranca el bot en bucle
-  python main.py --once   → ejecuta un solo ciclo y termina
-  python main.py --scan   → solo escanea mercados sin ejecutar órdenes
+El dashboard se abre en http://localhost:5000
 """
 import sys
 import signal
 import time
+import threading
 import schedule
 from loguru import logger
 
@@ -30,13 +25,16 @@ from src.strategy import ImbalanceStrategy
 from src.risk import RiskManager
 from src.trader import Trader
 
+# Importaciones de paper trading y dashboard
+from paper_trading.engine import PaperTradingEngine
+from paper_trading import db as paper_db
+from dashboard.app import run_dashboard, update_bot_status
 
-# ─── Estado global ───────────────────────────────────────────────────────────
+# ─── Control de apagado ──────────────────────────────────────────────────────
 _running = True
 
 
 def handle_shutdown(sig, frame):
-    """Maneja Ctrl+C para apagar el bot limpiamente."""
     global _running
     logger.info("⏹  Señal de parada recibida. Cerrando el bot...")
     _running = False
@@ -53,83 +51,111 @@ def run_cycle(
     strategy: ImbalanceStrategy,
     risk: RiskManager,
     trader: Trader,
+    paper: PaperTradingEngine | None,
 ):
-    """
-    Ejecuta un ciclo completo: escanear → analizar → operar.
-    """
+    """Un ciclo completo: comprobar resoluciones → escanear → analizar → operar."""
+
+    # 1. Comprobar si algún mercado abierto se ha resuelto (solo en paper trading)
+    if paper:
+        paper.check_resolutions()
+
     logger.info("=" * 60)
-    logger.info(f"🔄 Iniciando ciclo | {risk.status_summary()}")
+    logger.info(f"🔄 Escaneando mercados | {risk.status_summary()}")
     logger.info("=" * 60)
 
-    # 1. Obtener mercados que pasan los filtros
+    # 2. Obtener mercados que pasan los filtros
     markets = scanner.get_active_markets(limit=50)
 
     if not markets:
         logger.warning("No se encontraron mercados que pasen los filtros")
+        paper_db.log_scan_cycle(0, 0, 0)
+        update_bot_status(running=True)
         return
 
     signals_found = 0
     trades_executed = 0
 
-    # 2. Analizar cada mercado
+    # 3. Analizar cada mercado
     for market in markets:
-        # Si el riesgo no permite más operaciones, paramos
         if not risk.can_trade(market.condition_id):
-            # Comprobamos si es el stop loss diario (para evitar spamear el log)
             if risk.daily_pnl <= -config.MAX_DAILY_LOSS_USDC:
                 logger.warning("Stop loss diario alcanzado. Fin del ciclo.")
                 break
             continue
 
-        # Obtener el order book del token YES
         ob_yes = scanner.get_order_book(market.token_id_yes)
-
         if ob_yes is None:
-            logger.debug(f"Sin order book para: {market.question[:50]}")
             continue
 
-        # Analizar con la estrategia
         signal = strategy.analyze(market, ob_yes)
-
         if signal is None:
             continue
 
         signals_found += 1
 
-        # Ejecutar la operación
         success = trader.execute(signal)
         if success:
             trades_executed += 1
 
-        # Pequeña pausa entre órdenes para no saturar la API
-        time.sleep(0.5)
+        time.sleep(0.3)
+
+    # 4. Guardar estadísticas del ciclo
+    paper_db.log_scan_cycle(len(markets), signals_found, trades_executed)
+    update_bot_status(running=True)
 
     logger.info(
-        f"✅ Ciclo completado | Señales: {signals_found} | "
-        f"Órdenes: {trades_executed} | {risk.status_summary()}"
+        f"✅ Ciclo completado | "
+        f"Señales: {signals_found} | Órdenes: {trades_executed} | "
+        f"{risk.status_summary()}"
     )
 
 
-# ─── Inicialización ──────────────────────────────────────────────────────────
+# ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
     setup_logger()
 
-    # Modo scan-only: no ejecuta órdenes, solo muestra oportunidades
-    scan_only = "--scan" in sys.argv
-    run_once = "--once" in sys.argv or scan_only
+    scan_only   = "--scan"    in sys.argv
+    run_once    = "--once"    in sys.argv or scan_only
+    no_dash     = "--no-dash" in sys.argv
 
-    logger.info("🤖 Polymarket Bot arrancando...")
-    logger.info(
-        f"Modo: {'SCAN ONLY' if scan_only else 'DRY RUN' if config.DRY_RUN else '⚡ LIVE (DINERO REAL)'}"
+    # En modo scan, forzar paper trading apagado para no guardar nada
+    if scan_only:
+        config.PAPER_TRADING = False
+        config.DRY_RUN = True
+
+    mode_label = (
+        "SCAN ONLY"   if scan_only else
+        "PAPER TRADING" if config.PAPER_TRADING else
+        "DRY RUN"     if config.DRY_RUN else
+        "⚡ LIVE (DINERO REAL)"
     )
+    logger.info(f"🤖 Polymarket Bot arrancando | Modo: {mode_label}")
 
-    # Validar configuración (no arranca si falta la private key)
+    # Validar configuración
     try:
         validate()
     except ValueError as e:
         logger.error(str(e))
         sys.exit(1)
+
+    # Inicializar motor de paper trading
+    paper = None
+    if config.PAPER_TRADING and not scan_only:
+        paper_db.init_db()
+        paper = PaperTradingEngine(initial_balance=config.PAPER_INITIAL_BALANCE)
+
+    # Arrancar dashboard en hilo secundario
+    if config.DASHBOARD_ENABLED and not no_dash and not scan_only:
+        dash_thread = threading.Thread(
+            target=run_dashboard,
+            kwargs={"port": config.DASHBOARD_PORT},
+            daemon=True,
+        )
+        dash_thread.start()
+        logger.info(
+            f"📊 Dashboard disponible en http://localhost:{config.DASHBOARD_PORT}"
+        )
 
     # Conectar con Polymarket
     poly_client = PolymarketClient()
@@ -139,43 +165,36 @@ def main():
         logger.error(f"No se pudo conectar con Polymarket: {e}")
         sys.exit(1)
 
-    # Mostrar saldo
     balance = poly_client.get_balance()
-    logger.info(f"💰 Saldo en USDC: {balance:.2f}")
+    logger.info(f"💰 Saldo real en Polymarket: {balance:.2f} USDC")
 
-    if balance < config.MAX_POSITION_USDC and not config.DRY_RUN:
-        logger.warning(
-            f"⚠️  Tu saldo ({balance:.2f} USDC) es menor que el tamaño máximo de posición "
-            f"({config.MAX_POSITION_USDC:.2f} USDC). Considera reducir MAX_POSITION_USDC."
+    if paper:
+        logger.info(
+            f"💡 Balance de paper trading: {paper.get_current_balance():.2f} USDC"
         )
 
-    # Si es modo scan-only, forzamos DRY_RUN
-    if scan_only:
-        config.DRY_RUN = True
-
     # Inicializar componentes
-    scanner = MarketScanner()
+    scanner  = MarketScanner()
     strategy = ImbalanceStrategy()
-    risk = RiskManager()
-    trader = Trader(clob, risk)
+    risk     = RiskManager()
+    trader   = Trader(clob, risk, paper_engine=paper)
 
-    # Ejecutar
+    update_bot_status(running=True)
+
     if run_once:
-        run_cycle(scanner, strategy, risk, trader)
+        run_cycle(scanner, strategy, risk, trader, paper)
+        update_bot_status(running=False)
         return
 
-    # Bucle continuo con schedule
+    # Bucle continuo
     logger.info(
-        f"⏱  Ejecutando ciclo cada {config.SCAN_INTERVAL_SECONDS} segundos. "
-        "Pulsa Ctrl+C para detener."
+        f"⏱  Escaneando cada {config.SCAN_INTERVAL_SECONDS}s. Pulsa Ctrl+C para parar."
     )
 
-    # Primer ciclo inmediato
-    run_cycle(scanner, strategy, risk, trader)
+    run_cycle(scanner, strategy, risk, trader, paper)  # Primer ciclo inmediato
 
-    # Programar ciclos siguientes
     schedule.every(config.SCAN_INTERVAL_SECONDS).seconds.do(
-        run_cycle, scanner, strategy, risk, trader
+        run_cycle, scanner, strategy, risk, trader, paper
     )
 
     while _running:
@@ -183,8 +202,8 @@ def main():
         time.sleep(1)
 
     # Apagado limpio
-    logger.info("Cancelando órdenes abiertas antes de salir...")
     trader.cancel_all_orders()
+    update_bot_status(running=False)
     logger.info("👋 Bot detenido.")
 
 
