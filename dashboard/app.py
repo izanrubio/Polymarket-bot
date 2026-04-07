@@ -4,6 +4,8 @@ app.py — Servidor web del dashboard
 import threading
 import time
 import requests as http
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from datetime import datetime, timezone
 from flask import Flask, jsonify, render_template
 
@@ -33,7 +35,7 @@ def _get_eur_rate() -> float:
     if now - _rate_fetched_at < 3600:   # refrescar máximo una vez por hora
         return _eur_rate
     try:
-        r = http.get("https://open.er-api.com/v6/latest/USD", timeout=5)
+        r = http.get("https://open.er-api.com/v6/latest/USD", timeout=5, verify=False)
         r.raise_for_status()
         _eur_rate = r.json()["rates"]["EUR"]
         _rate_fetched_at = now

@@ -11,7 +11,11 @@ Flujo:
   3. get_current_balance()    → saldo inicial ± P&L de operaciones cerradas
 """
 import requests
+import urllib3
 from loguru import logger
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+_SSL = False
 
 from paper_trading import db
 from src.strategy import TradeSignal, Side
@@ -105,6 +109,7 @@ class PaperTradingEngine:
                 f"{self.GAMMA_URL}/markets",
                 params={"condition_ids": trade["condition_id"]},
                 timeout=5,
+                verify=_SSL,
             )
             resp.raise_for_status()
             markets = resp.json()

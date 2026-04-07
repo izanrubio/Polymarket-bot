@@ -7,7 +7,12 @@ La API CLOB devuelve el order book en tiempo real.
 from dataclasses import dataclass
 from typing import Optional
 import requests
+import urllib3
 from loguru import logger
+
+# Desactivar advertencias de SSL (problema de certificados en algunos sistemas Linux)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+_SSL = False  # ponlo en True si tu sistema tiene los certificados bien configurados
 import config
 
 
@@ -72,6 +77,7 @@ class MarketScanner:
                         "ascending": "false",
                     },
                     timeout=10,
+                    verify=_SSL,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -147,6 +153,7 @@ class MarketScanner:
                 f"{self.CLOB_URL}/book",
                 params={"token_id": token_id},
                 timeout=5,
+                verify=_SSL,
             )
             resp.raise_for_status()
             data = resp.json()
